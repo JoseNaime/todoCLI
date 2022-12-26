@@ -5,6 +5,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"log"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -37,18 +38,54 @@ func getCountOfTasks() int {
 	return len(data.Task)
 }
 
+func taskExists(id int) bool {
+	for _, task := range getAllTasks().Task {
+		if task.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func deleteAllTasks() error {
+	_ = os.WriteFile(userDir+"/todoCLI/tasks.json", []byte(`{"tasks": []}`), 0644)
+	return nil
+}
+
+func deleteTask(id int) bool {
+	allTasks := getAllTasks()
+
+	for i, task := range allTasks.Task {
+		if task.ID == id {
+			allTasks.Task = append(allTasks.Task[:i], allTasks.Task[i+1:]...)
+		}
+	}
+
+	file, err := json.MarshalIndent(allTasks, "", " ")
+
+	if err != nil {
+		return false
+	}
+
+	_ = os.WriteFile(userDir+"/todoCLI/tasks.json", file, 0644)
+
+	reassignIDs()
+
+	return true
+}
+
 func getAllTasks() Tasks {
 	file, err := os.ReadFile(userDir + "/todoCLI/tasks.json")
 
-	data := Tasks{}
+	allTasks := Tasks{}
 
-	err = json.Unmarshal(file, &data)
+	err = json.Unmarshal(file, &allTasks)
 
 	if err != nil {
-		return data
+		return allTasks
 	}
 
-	return data
+	return allTasks
 }
 
 func writeTaskToFile(task Task) error {
@@ -57,6 +94,25 @@ func writeTaskToFile(task Task) error {
 	data.Task = append(data.Task, task)
 
 	file, err := json.MarshalIndent(data, "", " ")
+
+	if err != nil {
+		return err
+	}
+
+	_ = os.WriteFile(userDir+"/todoCLI/tasks.json", file, 0644)
+
+	return nil
+}
+
+func reassignIDs() error {
+	allTasks := getAllTasks()
+
+	for i, task := range allTasks.Task {
+		task.ID = i + 1
+		allTasks.Task[i] = task
+	}
+
+	file, err := json.MarshalIndent(allTasks, "", " ")
 
 	if err != nil {
 		return err
@@ -141,9 +197,41 @@ func main() {
 			{
 				Name:    "remove",
 				Aliases: []string{"r"},
-				Usage:   "Remove a task from the list",
+				Usage:   "Remove a task from the list by its ID",
+				Flags: []cli.Flag{
+					&cli.IntFlag{Name: "all", Aliases: []string{"a"}, Usage: "Remove all tasks", Required: false},
+				},
 				Action: func(c *cli.Context) error {
-					log.Println("Removed a task")
+					taskIDStr := c.Args().Get(0)
+
+					if taskIDStr == "" {
+						return cli.Exit("No task ID provided", 1)
+					}
+
+					if taskIDStr == "all" {
+						err := deleteAllTasks()
+						if err != nil {
+							return err
+						}
+						return nil
+					}
+
+					taskID, err := strconv.Atoi(taskIDStr)
+
+					if err != nil {
+						return cli.Exit("Invalid task ID provided", 1)
+					}
+
+					if !taskExists(taskID) {
+						return cli.Exit("Task does not exist", 1)
+					}
+
+					if deleteTask(taskID) {
+						log.Printf("Task %d has been deleted", taskID)
+					} else {
+						return cli.Exit("Error deleting task", 1)
+					}
+
 					return nil
 				},
 			},
